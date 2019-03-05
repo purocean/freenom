@@ -19,39 +19,39 @@ date_default_timezone_set('Asia/Shanghai');
 /**
  * 自定义错误处理
  */
-register_shutdown_function('customize_error_handler');
-function customize_error_handler()
-{
-    if (!is_null($error = error_get_last())) {
-        system_log($error);
+// register_shutdown_function('customize_error_handler');
+// function customize_error_handler()
+// {
+//     if (!is_null($error = error_get_last())) {
+//         system_log($error);
 
-        $response = [
-            'STATUS' => 9,
-            'MESSAGE_ARRAY' => array(
-                array(
-                    'MESSAGE' => '程序执行出错，请稍后再试。'
-                )
-            ),
-            'SYSTEM_DATE' => date('Y-m-d H:i:s')
-        ];
+//         $response = [
+//             'STATUS' => 9,
+//             'MESSAGE_ARRAY' => array(
+//                 array(
+//                     'MESSAGE' => '程序执行出错，请稍后再试。'
+//                 )
+//             ),
+//             'SYSTEM_DATE' => date('Y-m-d H:i:s')
+//         ];
 
-        header('Content-Type: application/json');
+//         header('Content-Type: application/json');
 
-        echo json_encode($response);
-    }
-}
+//         echo json_encode($response);
+//     }
+// }
 
-/**
- * 自定义异常处理
- * 设置默认的异常处理程序，用于没有用 try/catch 块来捕获的异常。 在 exception_handler 调用后异常会中止。由于要实现在 try/catch 块
- * 每次抛出异常后，在catch块自动发送一封通知邮件的功能，而使用PHPMailer发送邮件的流程本身也可能抛出异常，要在catch代码块中捕获异常就意味着
- * 要嵌套try/catch，而我并不想嵌套try/catch代码块，因此自定义此异常处理函数。
- */
-set_exception_handler('exception_handler');
-function exception_handler($e)
-{
-    system_log(sprintf('#%d - %s', $e->getCode(), $e->getMessage()));
-}
+// /**
+//  * 自定义异常处理
+//  * 设置默认的异常处理程序，用于没有用 try/catch 块来捕获的异常。 在 exception_handler 调用后异常会中止。由于要实现在 try/catch 块
+//  * 每次抛出异常后，在catch块自动发送一封通知邮件的功能，而使用PHPMailer发送邮件的流程本身也可能抛出异常，要在catch代码块中捕获异常就意味着
+//  * 要嵌套try/catch，而我并不想嵌套try/catch代码块，因此自定义此异常处理函数。
+//  */
+// set_exception_handler('exception_handler');
+// function exception_handler($e)
+// {
+//     system_log(sprintf('#%d - %s', $e->getCode(), $e->getMessage()));
+// }
 
 /**
  * 记录程序日志
@@ -88,8 +88,6 @@ require VENDOR_PATH . 'autoload.php';
 require 'llfexception.php';
 
 use Curl\Curl;
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
 
 class FREENOM
 {
@@ -276,11 +274,11 @@ class FREENOM
 
         system_log($renew_log ?: sprintf("在%s这个时刻，并没有需要续期的域名，写这条日志是为了证明我确实执行了。今次取得的域名信息如是：\n%s", date('Y-m-d H:i:s'), var_export($domains, true)));
         if ($this->notRenewed || $this->renewed) {
-            $this->sendEmail(
+            $this->sendNotice(
                 '主人，我刚刚帮你续期域名啦~',
                 [
-                    $this->renewed ? '续期成功：' . $this->renewed . '<br>' : '',
-                    $this->notRenewed ? '续期出错：' . $this->notRenewed . '<br>' : '',
+                    $this->renewed ? '续期成功：' . $this->renewed . "\n" : '',
+                    $this->notRenewed ? '续期出错：' . $this->notRenewed . "\n" : '',
                     $this->domainsInfo ?: '啊咧~没看到其它域名呢。'
                 ]
             );
@@ -292,69 +290,24 @@ class FREENOM
     }
 
     /**
-     * 发送邮件
+     * 发送通知，使用 telegram
      * @param string $subject 标题
      * @param string|array $content 正文
      * @param string $to 收件人，选传
      * @param string $template 模板，选传
      * @throws \Exception
      */
-    public function sendEmail($subject, $content, $to = '', $template = '')
+    public function sendNotice($subject, $content)
     {
-        $mail = new PHPMailer(true);
+        $text = "**$subject** \n\n $content";
 
-        // 邮件服务配置
-        $mail->SMTPDebug = static::$config['mail']['debug']; // debug，正式环境应关闭 0：关闭 1：客户端信息 2：客户端和服务端信息
-        $mail->isSMTP(); // 告诉PHPMailer使用SMTP
-        $mail->Host = 'smtp.gmail.com'; // SMTP服务器
-        $mail->SMTPAuth = true; // 启用SMTP身份验证
-        $mail->Username = static::$config['mail']['username']; // 账号
-        $mail->Password = static::$config['mail']['password']; // 密码
-        $mail->SMTPSecure = 'tls'; // 将加密系统设置为使用 - ssl（不建议使用）或tls
-        $mail->Port = 587; // 设置SMTP端口号 - tsl使用587端口，ssl使用465端口
+        $curl = new Curl;
 
-        $mail->CharSet = 'UTF-8'; // 防止中文邮件乱码
-        $mail->setLanguage('zh_cn', VENDOR_PATH . '/phpmailer/phpmailer/language/'); // 设置语言
-
-        $mail->setFrom(static::$config['mail']['from'], 'im robot'); // 发件人
-        $mail->addAddress($to ?: static::$config['mail']['to'], '罗叔叔'); // 添加收件人，参数2选填
-        $mail->addReplyTo(static::$config['mail']['replyTo'], '罗飞飞'); // 备用回复地址，收到的回复的邮件将被发到此地址
-
-        /**
-         * 抄送和密送都是添加收件人，抄送方式下，被抄送者知道除被密送者外的所有的收件人，密送方式下，
-         * 被密送者知道所有的被抄送者，但不知道其它的被密送者。
-         * 抄送好比@，密送好比私信。
-         */
-//        $mail->addCC('cc@example.com'); // 抄送
-//        $mail->addBCC('bcc@example.com'); // 密送
-
-        // 添加附件，参数2选填
-//        $mail->addAttachment('README.md', '说明.txt');
-
-        // 内容
-        $mail->Subject = $subject; // 标题
-        /**
-         * 正文
-         * 使用html文件内容作为正文，其中的图片将被base64编码，另确保html样式为内联形式，且某些样式可能需要!important方能正常显示，
-         * msgHTML方法的第二个参数指定html内容中图片的路径，在转换时会拼接html中图片的相对路径得到完整的路径，最右侧无需“/”，PHPMailer
-         * 源码里有加。css中的背景图片不会被转换，这是PHPMailer已知问题，建议外链。
-         * 此处也可替换为：
-         * $mail->isHTML(true); // 设为html格式
-         * $mail->Body = '正文'; // 支持html
-         * $mail->AltBody = 'This is an HTML-only message. To view it, activate HTML in your email application.'; // 纯文本消息正文。不支持html预览的邮件客户端将显示此预览消息，其它情况将显示正常的body
-         */
-        $template = file_get_contents('mail/' . ($template ?: 'default') . '.html');
-        if (is_array($content)) {
-            array_unshift($content, $template);
-            $message = call_user_func_array('sprintf', $content);
-        } else if (is_string($content)) {
-            $message = sprintf($template, $content);
-        } else {
-            throw new LlfException(6007);
-        }
-        $mail->msgHTML($message, __DIR__ . '/mail');
-
-        if (!$mail->send()) throw new \Exception($mail->ErrorInfo);
+        $curl->post('https://api.telegram.org/bot' . urlencode(static::$config['telegram']['token']) . '/sendMessage', [
+            'chat_id' => static::$config['telegram']['chatId'],
+            'text' => $text,
+            'parse_mode'=> 'Markdown'
+        ]);
     }
 }
 
@@ -370,11 +323,9 @@ try {
     FREENOM::instance()->renewDomains();
 } catch (LlfException $e) {
     system_log($e->getMessage());
-    FREENOM::instance()->sendEmail(
+    FREENOM::instance()->sendNotice(
         '主人，' . $e->getMessage(),
-        sprintf('具体是在%s文件的%d行，抛出了一个异常。异常的内容是%s，快去看看吧。', $e->getFile(), $e->getLine(), $e->getMessage()),
-        '',
-        'llfexception'
+        sprintf('具体是在%s文件的%d行，抛出了一个异常。异常的内容是%s，快去看看吧。', $e->getFile(), $e->getLine(), $e->getMessage())
     );
 } catch (\Exception $e) {
     system_log(sprintf('#%d - %s', $e->getCode(), $e->getMessage()));
